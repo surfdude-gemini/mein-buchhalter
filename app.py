@@ -1,3 +1,5 @@
+from backend_logic import DataManager, PayrollEngine
+
 import streamlit as st
 import pandas as pd
 import sqlite3
