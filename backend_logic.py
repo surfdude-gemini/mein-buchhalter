@@ -1,6 +1,5 @@
 import sqlite3
 import google.generativeai as genai
-from google.generativeai.types import RequestOptions
 import json
 from datetime import datetime
 
@@ -32,6 +31,7 @@ class DataManager:
 class PayrollEngine:
     @staticmethod
     def calculate(brutto, qst_rate, bvg_fix=25.0):
+        # Sätze basierend auf deinen Grooming Atelier Vorlagen
         ahv, alv, nbu = 0.053, 0.011, 0.012
         total_sozial = ahv + alv + nbu
         abzug_sozial = brutto * total_sozial
@@ -42,32 +42,28 @@ class PayrollEngine:
 class AIProcessor:
     def __init__(self, api_key):
         genai.configure(api_key=api_key)
-        # Wir probieren verschiedene Modell-Varianten
-        self.model_names = ['gemini-1.5-flash', 'gemini-1.5-flash-latest']
+        # Wir definieren das Modell direkt
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
 
     def analyze_receipt(self, pil_image):
-        prompt = """Analysiere diese Quittung. Extrahiere: datum (YYYY-MM-DD), händler, betrag (Zahl), mwst (Zahl). 
-        Antworte NUR als JSON: {"datum": "2026-02-24", "händler": "Shop", "betrag": 10.50, "mwst": 8.1}"""
+        prompt = """Analysiere dieses Quittungsbild. Extrahiere:
+        - datum: YYYY-MM-DD
+        - händler: Name des Geschäfts
+        - betrag: Gesamtsumme als Zahl (z.B. 45.90)
+        - mwst: MwSt-Satz als Zahl (z.B. 8.1 oder 2.6)
+        Gib NUR valides JSON zurück: {"datum": "...", "händler": "...", "betrag": 0.0, "mwst": 0.0}"""
         
-        last_error = None
-        for name in self.model_names:
-            try:
-                # Wir erzwingen API-Version v1 für maximale Stabilität
-                model = genai.GenerativeModel(model_name=name)
-                response = model.generate_content(
-                    [prompt, pil_image],
-                    request_options=RequestOptions(api_version='v1')
-                )
-                
-                res_text = response.text.strip()
-                if "```json" in res_text:
-                    res_text = res_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in res_text:
-                    res_text = res_text.split("```")[1].split("```")[0].strip()
-                
-                return json.loads(res_text)
-            except Exception as e:
-                last_error = e
-                continue
-        
-        raise Exception(f"Modell-Fehler: {last_error}")
+        try:
+            # Einfacher Aufruf ohne api_version im Keyword
+            response = self.model.generate_content([prompt, pil_image])
+            
+            res_text = response.text.strip()
+            # Falls die KI Markdown-Codeblöcke mitsendet, diese entfernen
+            if "```json" in res_text:
+                res_text = res_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in res_text:
+                res_text = res_text.split("```")[1].split("```")[0].strip()
+            
+            return json.loads(res_text)
+        except Exception as e:
+            raise Exception(f"KI-Verarbeitungsfehler: {str(e)}")
