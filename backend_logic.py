@@ -32,12 +32,23 @@ class DataManager:
 class AIProcessor:
     def __init__(self, api_key):
         self.api_key = api_key
+        # Wir definieren die Basis-URL fest auf v1beta
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     def analyze_receipt(self, pil_image):
-        # Wir probieren die zwei gängigsten Endpunkte direkt nacheinander
+        # Schritt 1: Verfügbare Modelle prüfen (um den 404 zu debuggen)
+        list_url = f"{self.base_url}/models?key={self.api_key}"
+        try:
+            models_res = requests.get(list_url).json()
+            available_models = [m["name"] for m in models_res.get("models", [])]
+        except:
+            available_models = []
+
+        # Schritt 2: Wir probieren die zwei wahrscheinlichsten Pfade
+        # Beachte das Präfix 'models/' - das fehlt oft und verursacht 404
         endpoints = [
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}",
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key={self.api_key}"
+            f"{self.base_url}/models/gemini-1.5-flash:generateContent?key={self.api_key}",
+            f"{self.base_url}/models/gemini-pro-vision:generateContent?key={self.api_key}"
         ]
         
         buffered = BytesIO()
@@ -53,23 +64,23 @@ class AIProcessor:
             }]
         }
 
-        last_error = ""
+        last_err = "Kein Modell antwortet."
         for url in endpoints:
             try:
-                response = requests.post(url, json=payload, timeout=10)
+                response = requests.post(url, json=payload, timeout=15)
                 res_json = response.json()
                 
                 if "candidates" in res_json:
                     text_res = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    # JSON-Säuberung
                     if "```json" in text_res:
                         text_res = text_res.split("```json")[1].split("```")[0].strip()
                     elif "```" in text_res:
                         text_res = text_res.split("```")[1].split("```")[0].strip()
                     return json.loads(text_res)
                 else:
-                    last_error = str(res_json.get("error", "Unbekannter Fehler"))
+                    last_err = res_json.get("error", {}).get("message", str(res_json))
             except Exception as e:
-                last_error = str(e)
+                last_err = str(e)
         
-        raise Exception(f"KI Fehler: {last_error}")
+        # Wenn alles fehlschlägt, geben wir die Liste der verfügbaren Modelle aus!
+        raise Exception(f"Modell-Fehler. Verfügbar für deinen Key: {available_models}. Fehler: {last_err}")
