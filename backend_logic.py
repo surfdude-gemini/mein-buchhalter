@@ -1,30 +1,70 @@
+import sqlite3
+import google.generativeai as genai
+import json
+from datetime import datetime
+
+class DataManager:
+    def __init__(self, db_name="business_2026.db"):
+        self.db_name = db_name
+        self.init_db()
+
+    def init_db(self):
+        with sqlite3.connect(self.db_name) as conn:
+            c = conn.cursor()
+            c.execute('''CREATE TABLE IF NOT EXISTS journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                datum TEXT, kategorie TEXT, text TEXT, 
+                betrag_brutto REAL, mwst_satz REAL, mwst_betrag REAL, typ TEXT)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT, brutto_basis REAL, qst_satz REAL, bvg_fix REAL)''')
+            conn.commit()
+
+    def add_entry(self, datum, kategorie, text, brutto, mwst_satz, typ):
+        mwst_betrag = round(brutto - (brutto / (1 + mwst_satz/100)), 2)
+        with sqlite3.connect(self.db_name) as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO journal (datum, kategorie, text, betrag_brutto, mwst_satz, mwst_betrag, typ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      (datum, kategorie, text, brutto, mwst_satz, mwst_betrag, typ))
+            conn.commit()
+
+class PayrollEngine:
+    @staticmethod
+    def calculate(brutto, qst_rate, bvg_fix=25.0):
+        ahv, alv, nbu = 0.053, 0.011, 0.012
+        total_sozial = ahv + alv + nbu
+        abzug_sozial = brutto * total_sozial
+        abzug_qst = brutto * (qst_rate / 100)
+        netto = brutto - abzug_sozial - abzug_qst - bvg_fix
+        return {"netto": round(netto, 2)}
+
 class AIProcessor:
     def __init__(self, api_key):
+        # Wir setzen die API ohne Version, damit die Library selbst wählt
         genai.configure(api_key=api_key)
-        # Wir definieren eine Liste von Modellen, die wir durchprobieren
-        self.model_names = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-pro-vision']
-        self.model = None
+        # Liste aller möglichen Namen für das Flash-Modell
+        self.models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-001', 'gemini-1.5-flash-latest']
 
     def analyze_receipt(self, pil_image):
-        prompt = """Extrahiere: datum (YYYY-MM-DD), händler, betrag (Zahl), mwst (Zahl). 
-        Antworte NUR als JSON: {"datum": "2026-02-24", "händler": "Shop", "betrag": 10.50, "mwst": 8.1}"""
+        prompt = """Analysiere diese Quittung. Antworte NUR im JSON Format:
+        {"datum": "YYYY-MM-DD", "händler": "Name", "betrag": 0.0, "mwst": 8.1}"""
         
         last_error = None
-        for name in self.model_names:
+        for model_name in self.models_to_try:
             try:
-                model = genai.GenerativeModel(name)
-                # Der entscheidende Fix: Wir senden das PIL Image direkt
+                model = genai.GenerativeModel(model_name)
                 response = model.generate_content([prompt, pil_image])
                 
-                text_response = response.text.strip()
-                if "```json" in text_response:
-                    text_response = text_response.split("```json")[1].split("```")[0].strip()
-                elif "```" in text_response:
-                    text_response = text_response.split("```")[1].split("```")[0].strip()
+                # JSON Säuberung
+                res_text = response.text.strip()
+                if "```json" in res_text:
+                    res_text = res_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in res_text:
+                    res_text = res_text.split("```")[1].split("```")[0].strip()
                 
-                return json.loads(text_response)
+                return json.loads(res_text)
             except Exception as e:
                 last_error = e
-                continue # Probiere das nächste Modell in der Liste
+                continue # Nächstes Modell versuchen
         
-        raise Exception(f"Alle KI-Modelle fehlgeschlagen. Letzter Fehler: {str(last_error)}")
+        raise Exception(f"Modell-Fehler: {last_error}. Versuche die requirements.txt zu prüfen.")
