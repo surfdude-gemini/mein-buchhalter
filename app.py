@@ -1,92 +1,138 @@
 import streamlit as st
 import pandas as pd
-from backend_logic import DataManager, PayrollEngine
+import sqlite3
 from datetime import datetime
+from backend_logic import DataManager, PayrollEngine, AIProcessor
+from PIL import Image
+import io
 
-# Backend initialisieren
+# --- INITIALISIERUNG ---
 dm = DataManager()
 engine = PayrollEngine()
 
-st.set_page_config(page_title="SimpleBK - Erfassung", page_icon="🐾")
-st.title("🐾 SimpleBK: Datenerfassung")
+# Überprüfen, ob der API Key vorhanden ist
+if "GEMINI_API_KEY" in st.secrets:
+    ai_processor = AIProcessor(st.secrets["GEMINI_API_KEY"])
+else:
+    st.warning("Bitte hinterlege den GEMINI_API_KEY in den Streamlit Secrets.")
+    ai_processor = None
 
-# Navigation in der Seitenleiste
-menu = st.sidebar.radio("Navigation", ["Mitarbeiter anlegen", "Belege erfassen", "Lohn abrechnen", "Journal"])
+# --- APP LAYOUT ---
+st.set_page_config(page_title="SimpleBK - Grooming Atelier", page_icon="🐾", layout="centered")
 
-# --- 1. MITARBEITER ANLEGEN ---
-if menu == "Mitarbeiter anlegen":
-    st.header("👤 Personal-Stammdaten")
-    st.write("Hier legst du die Basiswerte für deine Mitarbeiter fest.")
-    
-    with st.form("employee_form"):
-        name = st.text_input("Vollständiger Name")
-        brutto = st.number_input("Monatlicher Bruttolohn (CHF)", min_value=0.0, step=100.0)
-        qst = st.number_input("Quellensteuer-Satz (%)", min_value=0.0, max_value=20.0, value=1.97, step=0.01)
-        bvg = st.number_input("BVG Fixbetrag (CHF)", min_value=0.0, value=25.0)
-        
-        submit = st.form_submit_button("Mitarbeiter speichern")
-        
-        if submit and name:
-            dm.add_employee(name, brutto, qst, bvg)
-            st.success(f"Mitarbeiter {name} wurde erfolgreich angelegt!")
+# Custom CSS für ein schöneres Interface
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #4CAF50; color: white; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- 2. BELEGE ERFASSEN (Kamera & Manuel) ---
-elif menu == "Belege erfassen":
-    st.header("📸 Ausgaben & Belege")
-    
-    # Kamera-Input
-    img_file = st.camera_input("Beleg fotografieren")
-    
-    with st.form("entry_form"):
-        datum = st.date_input("Datum", datetime.now())
-        text = st.text_input("Beschreibung (Händler / Grund)")
-        betrag = st.number_input("Bruttobetrag (CHF)", min_value=0.0, step=0.05)
-        mwst = st.selectbox("MwSt-Satz (%)", [7.7, 8.1, 2.5, 2.6, 0.0]) # Aktuelle Schweizer Sätze
-        kat = st.selectbox("Kategorie", ["Material", "Miete", "Versicherung", "Marketing", "Sonstiges"])
-        
-        save_btn = st.form_submit_button("Buchung speichern")
-        
-        if save_btn and text:
-            dm.add_entry(datum.strftime("%Y-%m-%d"), kat, text, betrag, mwst, "AUSGABE")
-            st.success("Buchung erfolgreich im Journal gespeichert!")
+st.title("🐾 SimpleBK: Business Cockpit")
+st.subheader("Grooming Atelier - Finanzen & Lohn")
 
-# --- 3. LOHN ABRECHNEN ---
-elif menu == "Lohn abrechnen":
-    st.header("💰 Monatlicher Lohnlauf")
-    
-    # Mitarbeiter aus DB laden
-    import sqlite3
-    conn = sqlite3.connect(dm.db_name)
-    employees = pd.read_sql_query("SELECT * FROM employees", conn)
-    conn.close()
-    
-    if employees.empty:
-        st.warning("Bitte lege zuerst unter 'Mitarbeiter anlegen' Personal an.")
-    else:
-        selected_name = st.selectbox("Mitarbeiter wählen", employees['name'])
-        emp_data = employees[employees['name'] == selected_name].iloc[0]
-        
-        # Berechnung via Backend Engine
-        result = engine.calculate(emp_data['brutto_basis'], emp_data['qst_satz'], emp_data['bvg_fix'])
-        
-        st.subheader(f"Abrechnung für {selected_name}")
-        st.metric("Netto-Auszahlung", f"{result['netto']} CHF")
-        
-        if st.button("Diesen Lohn jetzt buchen"):
-            dm.add_entry(datetime.now().strftime("%Y-%m-%d"), "Personal", f"Lohn {selected_name}", result['netto'], 0.0, "AUSGABE")
-            st.success(f"Lohnzahlung für {selected_name} im Journal erfasst.")
+# --- NAVIGATION ---
+menu = st.sidebar.radio("Menü", ["Dashboard", "Beleg scannen", "Mitarbeiter verwalten", "Lohnabrechnung", "Journal"])
 
-# --- 4. JOURNAL ---
-elif menu == "Journal":
-    st.header("📖 Journal 2026")
-    import sqlite3
-    conn = sqlite3.connect(dm.db_name)
-    df = pd.read_sql_query("SELECT * FROM journal ORDER BY datum DESC", conn)
-    conn.close()
+# --- 1. DASHBOARD ---
+if menu == "Dashboard":
+    st.header("📊 Statistik 2026")
+    with sqlite3.connect(dm.db_name) as conn:
+        df = pd.read_sql_query("SELECT * FROM journal", conn)
     
     if not df.empty:
-        st.dataframe(df)
-        total = df[df['typ'] == 'AUSGABE']['betrag_brutto'].sum()
-        st.info(f"Gesamtausgaben aktuell: {total:.2f} CHF")
+        col1, col2, col3 = st.columns(3)
+        ausgaben = df[df['typ'] == 'AUSGABE']['betrag_brutto'].sum()
+        einnahmen = df[df['typ'] == 'EINNAHME']['betrag_brutto'].sum()
+        mwst = df['mwst_betrag'].sum()
+        
+        col1.metric("Einnahmen", f"{einnahmen:,.2f} CHF")
+        col2.metric("Ausgaben", f"{ausgaben:,.2f} CHF")
+        col3.metric("MwSt-Saldo", f"{mwst:,.2f} CHF")
+        
+        st.bar_chart(df.groupby('kategorie')['betrag_brutto'].sum())
     else:
-        st.write("Noch keine Einträge vorhanden.")
+        st.info("Noch keine Daten für 2026 vorhanden.")
+
+# --- 2. BELEG SCANNEN (MIT KI) ---
+elif menu == "Beleg scannen":
+    st.header("📸 KI-Beleg-Scanner")
+    
+    img_file = st.camera_input("Quittung fotografieren")
+    
+    # Session State für KI-Ergebnisse initialisieren
+    if 'ai_data' not in st.session_state:
+        st.session_state.ai_data = {"datum": datetime.now(), "händler": "", "betrag": 0.0, "mwst": 8.1}
+
+    if img_file and ai_processor:
+        with st.spinner("Gemini analysiert den Beleg..."):
+            try:
+                # Bild für KI vorbereiten
+                img_bytes = img_file.getvalue()
+                result = ai_processor.analyze_receipt({"mime_type": "image/jpeg", "data": img_bytes})
+                
+                # Daten im Session State speichern
+                st.session_state.ai_data = {
+                    "datum": datetime.strptime(result['datum'], "%Y-%m-%d"),
+                    "händler": result['händler'],
+                    "betrag": float(result['betrag']),
+                    "mwst": float(result['mwst'])
+                }
+                st.success("KI-Analyse erfolgreich!")
+            except Exception as e:
+                st.error(f"KI-Fehler: {e}")
+
+    # Erfassungsformular (wird durch KI vorausgefüllt)
+    with st.form("entry_form"):
+        f_datum = st.date_input("Datum", st.session_state.ai_data["datum"])
+        f_text = st.text_input("Händler / Beschreibung", st.session_state.ai_data["händler"])
+        f_betrag = st.number_input("Betrag Brutto (CHF)", value=st.session_state.ai_data["betrag"], step=0.05)
+        f_mwst = st.selectbox("MwSt-Satz (%)", [8.1, 2.6, 7.7, 2.5, 0.0], index=0)
+        f_kat = st.selectbox("Kategorie", ["Material", "Miete", "Lohn", "Versicherung", "Marketing", "Einnahmen"])
+        f_typ = st.radio("Typ", ["AUSGABE", "EINNAHME"], horizontal=True)
+        
+        if st.form_submit_button("In Journal speichern"):
+            dm.add_entry(f_datum.strftime("%Y-%m-%d"), f_kat, f_text, f_betrag, f_mwst, f_typ)
+            st.success("Buchung gespeichert!")
+            st.balloons()
+
+# --- 3. MITARBEITER VERWALTEN ---
+elif menu == "Mitarbeiter verwalten":
+    st.header("👤 Personal-Stammdaten")
+    with st.form("emp_form"):
+        name = st.text_input("Name des Mitarbeiters")
+        brutto = st.number_input("Basis Bruttolohn (CHF)", min_value=0.0)
+        qst = st.number_input("Quellensteuer-Satz (%)", value=1.97, step=0.01)
+        bvg = st.number_input("BVG Fixabzug (CHF)", value=25.0)
+        if st.form_submit_button("Mitarbeiter anlegen"):
+            dm.add_employee(name, brutto, qst, bvg)
+            st.success(f"{name} wurde im System registriert.")
+
+# --- 4. LOHNABRECHNUNG ---
+elif menu == "Lohnabrechnung":
+    st.header("💰 Lohnlauf 2026")
+    with sqlite3.connect(dm.db_name) as conn:
+        employees = pd.read_sql_query("SELECT * FROM employees", conn)
+    
+    if not employees.empty:
+        sel_emp = st.selectbox("Mitarbeiter wählen", employees['name'])
+        emp_row = employees[employees['name'] == sel_emp].iloc[0]
+        
+        # Berechnung
+        res = engine.calculate(emp_row['brutto_basis'], emp_row['qst_satz'], emp_row['bvg_fix'])
+        
+        st.info(f"Berechnung für {sel_emp} (Monat: {datetime.now().strftime('%B')})")
+        st.write(f"**Netto-Auszahlung: {res['netto']:.2f} CHF**")
+        
+        if st.button("Lohn jetzt buchen"):
+            dm.add_entry(datetime.now().strftime("%Y-%m-%d"), "Lohn", f"Lohnzahlung {sel_emp}", res['netto'], 0.0, "AUSGABE")
+            st.success("Lohn wurde im Journal als Ausgabe erfasst.")
+    else:
+        st.warning("Noch kein Personal angelegt.")
+
+# --- 5. JOURNAL ---
+elif menu == "Journal":
+    st.header("📖 Journal 2026")
+    with sqlite3.connect(dm.db_name) as conn:
+        df = pd.read_sql_query("SELECT * FROM journal ORDER BY datum DESC", conn)
+    st.dataframe(df, use_container_width=True)
