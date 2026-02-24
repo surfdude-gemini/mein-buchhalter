@@ -1,42 +1,48 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
-import os
+import sqlite3
 
-# --- DATENBANK FUNKTIONEN ---
-DB_FILE = "buchhaltung_2026.db"
+# Datenbank initialisieren
+conn = sqlite3.connect('business.db', check_same_thread=False)
+c = conn.cursor()
+c.execute('CREATE TABLE IF NOT EXISTS journal (datum TEXT, text TEXT, betrag REAL, typ TEXT)')
+conn.commit()
 
-def init_db():
-    # Erstellt die Datei automatisch, falls sie nicht existiert
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    # Tabelle für Ausgaben/Einnahmen
-    c.execute('''CREATE TABLE IF NOT EXISTS journal 
-                 (id INTEGER PRIMARY KEY, datum TEXT, typ TEXT, text TEXT, 
-                  betrag REAL, mwst_satz REAL, mwst_betrag REAL, kategorie TEXT)''')
-    conn.commit()
-    conn.close()
+st.set_page_config(page_title="SimpleBK", page_icon="🐾")
+st.title("SimpleBK - Grooming Atelier")
 
-# Datenbank beim Start initialisieren
-init_db()
+menu = st.sidebar.selectbox("Navigation", ["Dashboard", "Kamera-Scan", "Lohnabrechnung"])
 
-# --- APP LAYOUT ---
-st.set_page_config(page_title="SimpleBK - Grooming Atelier", layout="centered")
-st.title("🐾 SimpleBK - Business Cockpit")
+if menu == "Kamera-Scan":
+    st.header("📸 Beleg scannen")
+    img = st.camera_input("Foto machen")
+    if img:
+        st.success("Bild empfangen! KI Analyse startet...")
+        # Hier kommt der Gemini-API Teil rein
 
-menu = st.sidebar.selectbox("Menü", ["Dashboard", "Beleg scannen", "Lohnabrechnung", "Jahresjournal"])
-
-if menu == "Beleg scannen":
-    st.header("📸 Beleg-Erfassung")
-    img_file = st.camera_input("Quittung fotografieren")
+elif menu == "Lohnabrechnung":
+    st.header("💰 Lohn-Master 2026")
+    name = st.text_input("Mitarbeiter Name", "Bernadett Schweitzer")
+    brutto = st.number_input("Bruttolohn (CHF)", value=4500.0)
     
-    if img_file:
-        st.info("System-Aktion: Bild erkannt. KI-Analyse wird vorbereitet...")
-        # Hier ergänzen wir später den API-Key für Gemini
-        
-elif menu == "Jahresjournal":
-    st.header("📖 Journal 2026")
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT * FROM journal", conn)
-    st.dataframe(df)
-    conn.close()
+    # Die Logik aus deinem Mindmap/Excel
+    ahv = brutto * 0.053
+    alv = brutto * 0.011
+    nbu = brutto * 0.012
+    qst = brutto * 0.0197
+    bvg = 25.0  # Fixbetrag
+    
+    netto = brutto - (ahv + alv + nbu + qst + bvg)
+    
+    st.metric("Auszahlung Netto", f"{netto:.2f} CHF")
+    
+    if st.button("Lohn buchen"):
+        c.execute("INSERT INTO journal VALUES (?,?,?,?)", 
+                  (pd.Timestamp.now().strftime("%Y-%m-%d"), f"Lohn {name}", -netto, "Lohn"))
+        conn.commit()
+        st.success("Gebucht!")
+
+elif menu == "Dashboard":
+    st.header("📊 Jahres-Statistik")
+    data = pd.read_sql_query("SELECT * FROM journal", conn)
+    st.dataframe(data)
