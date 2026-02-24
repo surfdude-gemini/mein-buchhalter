@@ -32,8 +32,8 @@ class DataManager:
 class AIProcessor:
     def __init__(self, api_key):
         self.api_key = api_key
-        # Wir nutzen den stabilen v1 Endpunkt direkt per HTTP
-        self.url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+        # WIR NUTZEN JETZT GEMINI-PRO-VISION (STABILER FÜR DIREKTE HTTP CALLS)
+        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key={self.api_key}"
 
     def analyze_receipt(self, pil_image):
         # Bild in Base64 umwandeln
@@ -44,7 +44,7 @@ class AIProcessor:
         payload = {
             "contents": [{
                 "parts": [
-                    {"text": "Analysiere diese Quittung. Gib NUR JSON zurück: {\"datum\": \"YYYY-MM-DD\", \"händler\": \"Name\", \"betrag\": 0.0, \"mwst\": 8.1}"},
+                    {"text": "Analysiere diese Quittung. Extrahiere Datum (YYYY-MM-DD), Händlername, Bruttobetrag (Zahl) und MwSt-Satz (Zahl). Gib NUR JSON zurück: {\"datum\": \"2026-02-24\", \"händler\": \"Coop\", \"betrag\": 15.50, \"mwst\": 8.1}"},
                     {"inline_data": {"mime_type": "image/jpeg", "data": img_str}}
                 ]
             }]
@@ -53,13 +53,16 @@ class AIProcessor:
         response = requests.post(self.url, json=payload)
         res_json = response.json()
 
+        # Fehlerbehandlung für die API Antwort
         if "candidates" in res_json:
             text_res = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-            # JSON-Säuberung
+            # JSON-Säuberung (KI schreibt manchmal Markdown-Code-Blocks)
             if "```json" in text_res:
                 text_res = text_res.split("```json")[1].split("```")[0].strip()
             elif "```" in text_res:
                 text_res = text_res.split("```")[1].split("```")[0].strip()
             return json.loads(text_res)
         else:
-            raise Exception(f"API Fehler: {res_json}")
+            # Wenn es immer noch ein 404 ist, geben wir eine klare Meldung aus
+            error_msg = res_json.get("error", {}).get("message", "Unbekannter API Fehler")
+            raise Exception(f"Google API sagt: {error_msg}")
