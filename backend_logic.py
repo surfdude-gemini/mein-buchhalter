@@ -36,4 +36,26 @@ class DataManager:
             c = conn.cursor()
             c.execute("INSERT INTO journal (datum, kategorie, text, betrag_brutto, mwst_satz, mwst_betrag, typ) VALUES (?, ?, ?, ?, ?, ?, ?)",
                       (datum, kategorie, text, brutto, mwst_satz, mwst_betrag, typ))
+import google.generativeai as genai
+import json
+
+class AIProcessor:
+    def __init__(self, api_key):
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+
+    def analyze_receipt(self, image_data):
+        prompt = """
+        Analysiere dieses Quittungsbild und extrahiere:
+        1. Datum (Format YYYY-MM-DD)
+        2. Händlername
+        3. Bruttobetrag (Zahl)
+        4. MwSt-Satz (Zahl, z.B. 8.1 oder 2.6)
+        Gib das Ergebnis NUR als valides JSON zurück, z.B.:
+        {"datum": "2026-02-24", "händler": "MediaMarkt", "betrag": 119.00, "mwst": 8.1}
+        """
+        response = self.model.generate_content([prompt, image_data])
+        # Extrahiere JSON aus der Antwort (entferne Markdown-Formatierung falls vorhanden)
+        clean_json = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_json)
             conn.commit()
