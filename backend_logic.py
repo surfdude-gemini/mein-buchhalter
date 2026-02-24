@@ -19,13 +19,6 @@ class DataManager:
                 name TEXT, brutto_basis REAL, qst_satz REAL, bvg_fix REAL)''')
             conn.commit()
 
-    def add_employee(self, name, brutto, qst, bvg):
-        with sqlite3.connect(self.db_name) as conn:
-            c = conn.cursor()
-            c.execute("INSERT INTO employees (name, brutto_basis, qst_satz, bvg_fix) VALUES (?, ?, ?, ?)", 
-                      (name, brutto, qst, bvg))
-            conn.commit()
-
     def add_entry(self, datum, kategorie, text, brutto, mwst_satz, typ):
         mwst_betrag = round(brutto - (brutto / (1 + mwst_satz/100)), 2)
         with sqlite3.connect(self.db_name) as conn:
@@ -34,23 +27,24 @@ class DataManager:
                       (datum, kategorie, text, brutto, mwst_satz, mwst_betrag, typ))
             conn.commit()
 
-class PayrollEngine:
-    @staticmethod
-    def calculate(brutto, qst_rate, bvg_fix=25.0):
-        ahv, alv, nbu = 0.053, 0.011, 0.012
-        total_sozial = ahv + alv + nbu
-        abzug_sozial = brutto * total_sozial
-        abzug_qst = brutto * (qst_rate / 100)
-        netto = brutto - abzug_sozial - abzug_qst - bvg_fix
-        return {"netto": round(netto, 2)}
-
 class AIProcessor:
     def __init__(self, api_key):
         genai.configure(api_key=api_key)
+        # Wir nutzen 'gemini-1.5-flash', da es am schnellsten für Belege ist
         self.model = genai.GenerativeModel('gemini-1.5-flash')
 
     def analyze_receipt(self, image_data):
-        prompt = "Extrahiere Datum (YYYY-MM-DD), Händler, Bruttobetrag (Zahl) und MwSt-Satz (Zahl). Gib NUR JSON zurück: {\"datum\": \"...\", \"händler\": \"...\", \"betrag\": 0.0, \"mwst\": 0.0}"
+        prompt = """Extrahiere aus diesem Bild: Datum (YYYY-MM-DD), Händlername, Bruttobetrag (Zahl) und MwSt-Satz (Zahl). 
+        Antworte NUR im JSON-Format wie dieses Beispiel: {"datum": "2026-02-24", "händler": "Beispiel Shop", "betrag": 45.50, "mwst": 8.1}"""
+        
+        # Sicherstellen, dass das Bild korrekt übergeben wird
         response = self.model.generate_content([prompt, image_data])
-        clean_json = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_json)
+        
+        # JSON-Bereinigung (entfernt eventuelle Markdown-Tags der KI)
+        text_response = response.text.strip()
+        if text_response.startswith("```json"):
+            text_response = text_response.split("```json")[1].split("```")[0].strip()
+        elif text_response.startswith("```"):
+            text_response = text_response.split("```")[1].split("```")[0].strip()
+            
+        return json.loads(text_response)
