@@ -31,7 +31,7 @@ class DataManager:
 class PayrollEngine:
     @staticmethod
     def calculate(brutto, qst_rate, bvg_fix=25.0):
-        # Sätze basierend auf deinen Grooming Atelier Vorlagen
+        # Sätze basierend auf deinem SimpleBK Konzept
         ahv, alv, nbu = 0.053, 0.011, 0.012
         total_sozial = ahv + alv + nbu
         abzug_sozial = brutto * total_sozial
@@ -42,28 +42,28 @@ class PayrollEngine:
 class AIProcessor:
     def __init__(self, api_key):
         genai.configure(api_key=api_key)
-        # Wir definieren das Modell direkt
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        # Wir nutzen 'gemini-1.5-flash-latest' für maximale Kompatibilität
+        self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
     def analyze_receipt(self, pil_image):
-        prompt = """Analysiere dieses Quittungsbild. Extrahiere:
+        prompt = """Analysiere diese Quittung. Extrahiere:
         - datum: YYYY-MM-DD
         - händler: Name des Geschäfts
-        - betrag: Gesamtsumme als Zahl (z.B. 45.90)
-        - mwst: MwSt-Satz als Zahl (z.B. 8.1 oder 2.6)
-        Gib NUR valides JSON zurück: {"datum": "...", "händler": "...", "betrag": 0.0, "mwst": 0.0}"""
+        - betrag: Gesamtsumme (Zahl)
+        - mwst: MwSt-Satz in % (Zahl)
+        Antworte NUR im JSON-Format: {"datum": "...", "händler": "...", "betrag": 0.0, "mwst": 0.0}"""
         
         try:
-            # Einfacher Aufruf ohne api_version im Keyword
+            # Bild direkt übergeben
             response = self.model.generate_content([prompt, pil_image])
             
+            # JSON-Säuberung falls Markdown vorhanden
             res_text = response.text.strip()
-            # Falls die KI Markdown-Codeblöcke mitsendet, diese entfernen
             if "```json" in res_text:
                 res_text = res_text.split("```json")[1].split("```")[0].strip()
             elif "```" in res_text:
                 res_text = res_text.split("```")[1].split("```")[0].strip()
-            
+                
             return json.loads(res_text)
         except Exception as e:
-            raise Exception(f"KI-Verarbeitungsfehler: {str(e)}")
+            raise Exception(f"Fehler bei der KI-Analyse: {str(e)}")
