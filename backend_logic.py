@@ -3,6 +3,7 @@ import json
 import requests
 import base64
 from io import BytesIO
+from datetime import datetime
 
 class DataManager:
     def __init__(self, db_name="business_2026.db"):
@@ -32,10 +33,28 @@ class DataManager:
 class AIProcessor:
     def __init__(self, api_key):
         self.api_key = api_key
-        # Wir nutzen gemini-1.5-flash-latest, das ist der stabilste Alias-Pfad
-        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={self.api_key}"
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+    def get_working_model(self):
+        # Fragt Google nach verfügbaren Modellen für diesen Key
+        try:
+            list_url = f"{self.base_url}/models?key={self.api_key}"
+            res = requests.get(list_url).json()
+            if "models" in res:
+                # Suche nach Flash 1.5, dann nach Pro Vision
+                available = [m["name"] for m in res["models"]]
+                for target in ["gemini-1.5-flash", "gemini-pro-vision"]:
+                    for name in available:
+                        if target in name:
+                            return name
+            return "models/gemini-1.5-flash" # Fallback
+        except:
+            return "models/gemini-1.5-flash"
 
     def analyze_receipt(self, pil_image):
+        model_name = self.get_working_model()
+        url = f"{self.base_url}/{model_name}:generateContent?key={self.api_key}"
+        
         buffered = BytesIO()
         pil_image.save(buffered, format="JPEG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
@@ -49,18 +68,16 @@ class AIProcessor:
             }]
         }
 
-        response = requests.post(self.url, json=payload)
+        response = requests.post(url, json=payload)
         res_json = response.json()
 
         if "candidates" in res_json:
             text_res = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-            # Falls die KI Markdown-Codeblöcke mitsendet, diese entfernen
             if "```json" in text_res:
                 text_res = text_res.split("```json")[1].split("```")[0].strip()
             elif "```" in text_res:
                 text_res = text_res.split("```")[1].split("```")[0].strip()
             return json.loads(text_res)
         else:
-            # Detaillierte Fehlermeldung, falls es immer noch nicht klappt
-            msg = res_json.get("error", {}).get("message", "Unbekannter Fehler")
-            raise Exception(f"Google API Fehler: {msg}")
+            err = res_json.get("error", {}).get("message", "Kein Modell-Zugriff")
+            raise Exception(f"Google API Fehler ({model_name}): {err}")
