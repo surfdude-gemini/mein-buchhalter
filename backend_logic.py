@@ -1,5 +1,6 @@
 import sqlite3
 import google.generativeai as genai
+from google.generativeai.types import RequestOptions
 import json
 from datetime import datetime
 
@@ -40,32 +41,33 @@ class PayrollEngine:
 
 class AIProcessor:
     def __init__(self, api_key):
-        # Wir setzen die Konfiguration global
         genai.configure(api_key=api_key)
-        # Wir nutzen den stabilsten Modell-Namen ohne Pfad-Präfix
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        # Wir probieren verschiedene Modell-Varianten
+        self.model_names = ['gemini-1.5-flash', 'gemini-1.5-flash-latest']
 
     def analyze_receipt(self, pil_image):
-        # Präziser Prompt für strukturiertes JSON
-        prompt = """Analysiere dieses Bild. Extrahiere:
-        - datum: YYYY-MM-DD
-        - händler: Name des Shops
-        - betrag: Gesamtsumme (Zahl)
-        - mwst: MwSt-Satz (Zahl)
-        Gib NUR JSON zurück: {"datum": "...", "händler": "...", "betrag": 0.0, "mwst": 0.0}"""
+        prompt = """Analysiere diese Quittung. Extrahiere: datum (YYYY-MM-DD), händler, betrag (Zahl), mwst (Zahl). 
+        Antworte NUR als JSON: {"datum": "2026-02-24", "händler": "Shop", "betrag": 10.50, "mwst": 8.1}"""
         
-        try:
-            # Wir nutzen die generate_content Methode mit dem Bildobjekt
-            response = self.model.generate_content([prompt, pil_image])
-            
-            # JSON-Extraktion (falls die KI Markdown ```json ... ``` mitsendet)
-            res_text = response.text.strip()
-            if "```json" in res_text:
-                res_text = res_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in res_text:
-                res_text = res_text.split("```")[1].split("```")[0].strip()
+        last_error = None
+        for name in self.model_names:
+            try:
+                # Wir erzwingen API-Version v1 für maximale Stabilität
+                model = genai.GenerativeModel(model_name=name)
+                response = model.generate_content(
+                    [prompt, pil_image],
+                    request_options=RequestOptions(api_version='v1')
+                )
                 
-            return json.loads(res_text)
-        except Exception as e:
-            # Wir geben den Fehler detailliert aus, um ihn zu verstehen
-            raise Exception(f"KI konnte Bild nicht verarbeiten: {str(e)}")
+                res_text = response.text.strip()
+                if "```json" in res_text:
+                    res_text = res_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in res_text:
+                    res_text = res_text.split("```")[1].split("```")[0].strip()
+                
+                return json.loads(res_text)
+            except Exception as e:
+                last_error = e
+                continue
+        
+        raise Exception(f"Modell-Fehler: {last_error}")
