@@ -28,43 +28,36 @@ class DataManager:
                       (datum, kategorie, text, brutto, mwst_satz, mwst_betrag, typ))
             conn.commit()
 
+class AIProcessor:
+    def __init__(self, api_key):
+        genai.configure(api_key=api_key)
+        # Wir versuchen es direkt mit dem stabilen Flash-Modell
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+
+    def analyze_receipt(self, pil_image):
+        prompt = """Analysiere dieses Bild einer Quittung. 
+        Extrahiere die Daten und gib sie NUR als JSON zurück:
+        {"datum": "YYYY-MM-DD", "händler": "Name", "betrag": 0.0, "mwst": 8.1}
+        Wichtig: Wenn du den MwSt-Satz nicht sicher weißt, nimm 8.1."""
+        
+        try:
+            # Bild direkt übergeben
+            response = self.model.generate_content([prompt, pil_image])
+            res_text = response.text.strip()
+            
+            # JSON-Bereinigung falls die KI Markdown-Codeblöcke nutzt
+            if "```json" in res_text:
+                res_text = res_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in res_text:
+                res_text = res_text.split("```")[1].split("```")[0].strip()
+            
+            return json.loads(res_text)
+        except Exception as e:
+            raise Exception(f"KI-Fehler Details: {str(e)}")
+
 class PayrollEngine:
     @staticmethod
     def calculate(brutto, qst_rate, bvg_fix=25.0):
         ahv, alv, nbu = 0.053, 0.011, 0.012
-        total_sozial = ahv + alv + nbu
-        abzug_sozial = brutto * total_sozial
-        abzug_qst = brutto * (qst_rate / 100)
-        netto = brutto - abzug_sozial - abzug_qst - bvg_fix
+        netto = brutto - (brutto * (ahv + alv + nbu + (qst_rate / 100))) - bvg_fix
         return {"netto": round(netto, 2)}
-
-class AIProcessor:
-    def __init__(self, api_key):
-        # Wir setzen die API ohne Version, damit die Library selbst wählt
-        genai.configure(api_key=api_key)
-        # Liste aller möglichen Namen für das Flash-Modell
-        self.models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-001', 'gemini-1.5-flash-latest']
-
-    def analyze_receipt(self, pil_image):
-        prompt = """Analysiere diese Quittung. Antworte NUR im JSON Format:
-        {"datum": "YYYY-MM-DD", "händler": "Name", "betrag": 0.0, "mwst": 8.1}"""
-        
-        last_error = None
-        for model_name in self.models_to_try:
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content([prompt, pil_image])
-                
-                # JSON Säuberung
-                res_text = response.text.strip()
-                if "```json" in res_text:
-                    res_text = res_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in res_text:
-                    res_text = res_text.split("```")[1].split("```")[0].strip()
-                
-                return json.loads(res_text)
-            except Exception as e:
-                last_error = e
-                continue # Nächstes Modell versuchen
-        
-        raise Exception(f"Modell-Fehler: {last_error}. Versuche die requirements.txt zu prüfen.")
