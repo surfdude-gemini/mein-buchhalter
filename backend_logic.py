@@ -1,7 +1,8 @@
 import sqlite3
-import google.generativeai as genai
 import json
-from datetime import datetime
+import requests
+import base64
+from io import BytesIO
 
 class DataManager:
     def __init__(self, db_name="business_2026.db"):
@@ -28,50 +29,37 @@ class DataManager:
                       (datum, kategorie, text, brutto, mwst_satz, mwst_betrag, typ))
             conn.commit()
 
-class PayrollEngine:
-    @staticmethod
-    def calculate(brutto, qst_rate, bvg_fix=25.0):
-        ahv, alv, nbu = 0.053, 0.011, 0.012
-        total_sozial = ahv + alv + nbu
-        abzug_sozial = brutto * total_sozial
-        abzug_qst = brutto * (qst_rate / 100)
-        netto = brutto - abzug_sozial - abzug_qst - bvg_fix
-        return {"netto": round(netto, 2)}
-
 class AIProcessor:
     def __init__(self, api_key):
-        # Globale Konfiguration
-        genai.configure(api_key=api_key)
-        # Wir nutzen den absolut stabilsten Namen
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.api_key = api_key
+        # Wir nutzen den stabilen v1 Endpunkt direkt per HTTP
+        self.url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={self.api_key}"
 
     def analyze_receipt(self, pil_image):
-        prompt = """Analysiere dieses Bild. Extrahiere:
-        - datum: YYYY-MM-DD
-        - händler: Name
-        - betrag: Gesamtsumme (Zahl)
-        - mwst: Satz in % (Zahl)
-        Gib NUR JSON zurück: {"datum": "2026-02-24", "händler": "Shop", "betrag": 0.0, "mwst": 0.0}"""
-        
-        try:
-            # Expliziter Aufruf
-            response = self.model.generate_content([prompt, pil_image])
-            
-            # JSON-Extraktion aus der Antwort
-            res_text = response.text.strip()
-            if "```json" in res_text:
-                res_text = res_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in res_text:
-                res_text = res_text.split("```")[1].split("```")[0].strip()
-                
-            return json.loads(res_text)
-        except Exception as e:
-            # Falls das Modell nicht gefunden wird, probieren wir den voll qualifizierten Namen
-            if "404" in str(e):
-                try:
-                    alt_model = genai.GenerativeModel('models/gemini-1.5-flash')
-                    response = alt_model.generate_content([prompt, pil_image])
-                    return json.loads(response.text.strip())
-                except:
-                    pass
-            raise Exception(f"KI Fehler: {str(e)}")
+        # Bild in Base64 umwandeln
+        buffered = BytesIO()
+        pil_image.save(buffered, format="JPEG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": "Analysiere diese Quittung. Gib NUR JSON zurück: {\"datum\": \"YYYY-MM-DD\", \"händler\": \"Name\", \"betrag\": 0.0, \"mwst\": 8.1}"},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": img_str}}
+                ]
+            }]
+        }
+
+        response = requests.post(self.url, json=payload)
+        res_json = response.json()
+
+        if "candidates" in res_json:
+            text_res = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+            # JSON-Säuberung
+            if "```json" in text_res:
+                text_res = text_res.split("```json")[1].split("```")[0].strip()
+            elif "```" in text_res:
+                text_res = text_res.split("```")[1].split("```")[0].strip()
+            return json.loads(text_res)
+        else:
+            raise Exception(f"API Fehler: {res_json}")
