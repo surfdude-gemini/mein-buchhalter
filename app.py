@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from backend_logic import DataManager, PayrollEngine, AIProcessor
+from backend_logic import DataManager, AIProcessor
 from datetime import datetime
 import PIL.Image
 import sqlite3
@@ -16,7 +16,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 dm = DataManager()
-engine = PayrollEngine()
 
 if "GEMINI_API_KEY" in st.secrets:
     ai_proc = AIProcessor(st.secrets["GEMINI_API_KEY"])
@@ -25,7 +24,7 @@ else:
 
 st.title("🐾 SimpleBK")
 
-menu = st.sidebar.radio("Navigation", ["Scanner", "Journal", "Lohn"])
+menu = st.sidebar.radio("Navigation", ["Scanner", "Journal"])
 
 if menu == "Scanner":
     st.header("📸 Beleg scannen")
@@ -37,7 +36,7 @@ if menu == "Scanner":
     if img_file:
         try:
             img = PIL.Image.open(img_file)
-            with st.spinner("KI liest..."):
+            with st.spinner("KI liest direkt via API..."):
                 res = ai_proc.analyze_receipt(img)
                 st.session_state.scan_data = {
                     "d": datetime.strptime(res['datum'], "%Y-%m-%d"),
@@ -50,17 +49,14 @@ if menu == "Scanner":
             st.error(f"Scan-Fehler: {e}")
 
     with st.form("entry_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            d = st.date_input("Datum", st.session_state.scan_data["d"])
-            h = st.text_input("Händler", st.session_state.scan_data["h"])
-        with col2:
-            b = st.number_input("Betrag (CHF)", value=st.session_state.scan_data["b"])
-            m = st.number_input("MwSt %", value=st.session_state.scan_data["m"])
+        d = st.date_input("Datum", st.session_state.scan_data["d"])
+        h = st.text_input("Händler", st.session_state.scan_data["h"])
+        b = st.number_input("Betrag (CHF)", value=st.session_state.scan_data["b"])
+        m = st.number_input("MwSt %", value=st.session_state.scan_data["m"])
         
         if st.form_submit_button("Speichern"):
             dm.add_entry(d.strftime("%Y-%m-%d"), "Ausgabe", h, b, m, "AUSGABE")
-            st.success("Gebucht!")
+            st.success("Buchung gespeichert!")
 
 elif menu == "Journal":
     st.header("📖 Journal 2026")
