@@ -31,7 +31,6 @@ class DataManager:
 class PayrollEngine:
     @staticmethod
     def calculate(brutto, qst_rate, bvg_fix=25.0):
-        # Sätze basierend auf deinem SimpleBK Konzept
         ahv, alv, nbu = 0.053, 0.011, 0.012
         total_sozial = ahv + alv + nbu
         abzug_sozial = brutto * total_sozial
@@ -41,23 +40,24 @@ class PayrollEngine:
 
 class AIProcessor:
     def __init__(self, api_key):
+        # Globale Konfiguration
         genai.configure(api_key=api_key)
-        # Wir nutzen 'gemini-1.5-flash-latest' für maximale Kompatibilität
-        self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # Wir nutzen den absolut stabilsten Namen
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
 
     def analyze_receipt(self, pil_image):
-        prompt = """Analysiere diese Quittung. Extrahiere:
+        prompt = """Analysiere dieses Bild. Extrahiere:
         - datum: YYYY-MM-DD
-        - händler: Name des Geschäfts
+        - händler: Name
         - betrag: Gesamtsumme (Zahl)
-        - mwst: MwSt-Satz in % (Zahl)
-        Antworte NUR im JSON-Format: {"datum": "...", "händler": "...", "betrag": 0.0, "mwst": 0.0}"""
+        - mwst: Satz in % (Zahl)
+        Gib NUR JSON zurück: {"datum": "2026-02-24", "händler": "Shop", "betrag": 0.0, "mwst": 0.0}"""
         
         try:
-            # Bild direkt übergeben
+            # Expliziter Aufruf
             response = self.model.generate_content([prompt, pil_image])
             
-            # JSON-Säuberung falls Markdown vorhanden
+            # JSON-Extraktion aus der Antwort
             res_text = response.text.strip()
             if "```json" in res_text:
                 res_text = res_text.split("```json")[1].split("```")[0].strip()
@@ -66,4 +66,12 @@ class AIProcessor:
                 
             return json.loads(res_text)
         except Exception as e:
-            raise Exception(f"Fehler bei der KI-Analyse: {str(e)}")
+            # Falls das Modell nicht gefunden wird, probieren wir den voll qualifizierten Namen
+            if "404" in str(e):
+                try:
+                    alt_model = genai.GenerativeModel('models/gemini-1.5-flash')
+                    response = alt_model.generate_content([prompt, pil_image])
+                    return json.loads(response.text.strip())
+                except:
+                    pass
+            raise Exception(f"KI Fehler: {str(e)}")
