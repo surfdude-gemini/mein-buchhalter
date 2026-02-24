@@ -7,41 +7,40 @@ import sqlite3
 
 st.set_page_config(page_title="SimpleBK", page_icon="🐾", layout="wide")
 
-# CSS für Handy-Optimierung
+# CSS für bessere mobile Ansicht
 st.markdown("""
     <style>
     [data-testid="stCameraInput"] { width: 100% !important; }
-    .stButton>button { width: 100%; height: 3em; font-size: 1.2em; }
+    .stButton>button { width: 100%; height: 3.5em; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
 dm = DataManager()
 engine = PayrollEngine()
 
+# API Key Check
 if "GEMINI_API_KEY" in st.secrets:
     ai_proc = AIProcessor(st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("API Key fehlt in Secrets!")
+    st.error("Bitte trage den GEMINI_API_KEY in den Streamlit Secrets ein!")
 
-st.title("🐾 SimpleBK")
+st.title("🐾 SimpleBK - Grooming Atelier")
 
-menu = st.sidebar.radio("Menü", ["Scanner", "Journal", "Lohn", "Setup"])
+menu = st.sidebar.radio("Navigation", ["Scanner", "Journal", "Lohn", "Setup"])
 
 if menu == "Scanner":
-    st.header("📸 Quittung scannen")
-    img_file = st.camera_input("Beleg fotografieren")
+    st.header("📸 Beleg Scan")
+    img_file = st.camera_input("Quittung fotografieren")
     
-    # State für die Felder
-    if 'scanned_data' not in st.session_state:
-        st.session_state.scanned_data = {"d": datetime.now(), "h": "", "b": 0.0, "m": 8.1}
+    if 'data' not in st.session_state:
+        st.session_state.data = {"d": datetime.now(), "h": "", "b": 0.0, "m": 8.1}
 
     if img_file:
         try:
-            # Wir wandeln das File direkt in ein Bild um
             img = PIL.Image.open(img_file)
-            with st.spinner("KI liest..."):
+            with st.spinner("KI liest Quittung..."):
                 res = ai_proc.analyze_receipt(img)
-                st.session_state.scanned_data = {
+                st.session_state.data = {
                     "d": datetime.strptime(res['datum'], "%Y-%m-%d"),
                     "h": res['händler'],
                     "b": float(res['betrag']),
@@ -49,14 +48,18 @@ if menu == "Scanner":
                 }
                 st.success("Erkannt!")
         except Exception as e:
-            st.error(f"Scan-Fehler: {e}")
+            st.error(f"Fehler: {e}")
 
     with st.form("entry_form"):
-        d = st.date_input("Datum", st.session_state.scanned_data["d"])
-        h = st.text_input("Händler", st.session_state.scanned_data["h"])
-        b = st.number_input("Betrag (CHF)", value=st.session_state.scanned_data["b"])
-        m = st.number_input("MwSt %", value=st.session_state.scanned_data["m"])
-        if st.form_submit_button("Buchen"):
+        col_d, col_h = st.columns(2)
+        d = col_d.date_input("Datum", st.session_state.data["d"])
+        h = col_h.text_input("Händler", st.session_state.data["h"])
+        
+        col_b, col_m = st.columns(2)
+        b = col_b.number_input("Betrag (CHF)", value=st.session_state.data["b"])
+        m = col_m.number_input("MwSt %", value=st.session_state.data["m"])
+        
+        if st.form_submit_button("Buchung speichern"):
             dm.add_entry(d.strftime("%Y-%m-%d"), "Ausgabe", h, b, m, "AUSGABE")
             st.success("Gespeichert!")
 
