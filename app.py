@@ -20,7 +20,7 @@ dm = DataManager()
 if "GEMINI_API_KEY" in st.secrets:
     ai_proc = AIProcessor(st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("API Key fehlt in Secrets!")
+    st.error("API Key fehlt! Bitte in Streamlit Secrets hinterlegen.")
 
 st.title("🐾 SimpleBK")
 
@@ -36,7 +36,7 @@ if menu == "Scanner":
     if img_file:
         try:
             img = PIL.Image.open(img_file)
-            with st.spinner("KI liest direkt via API..."):
+            with st.spinner("KI sucht passendes Modell und liest..."):
                 res = ai_proc.analyze_receipt(img)
                 st.session_state.scan_data = {
                     "d": datetime.strptime(res['datum'], "%Y-%m-%d"),
@@ -44,15 +44,18 @@ if menu == "Scanner":
                     "b": float(res['betrag']),
                     "m": float(res['mwst'])
                 }
-                st.success("Daten erkannt!")
+                st.success("Erkannt!")
         except Exception as e:
-            st.error(f"Scan-Fehler: {e}")
+            st.error(f"Fehler: {e}")
 
     with st.form("entry_form"):
-        d = st.date_input("Datum", st.session_state.scan_data["d"])
-        h = st.text_input("Händler", st.session_state.scan_data["h"])
-        b = st.number_input("Betrag (CHF)", value=st.session_state.scan_data["b"])
-        m = st.number_input("MwSt %", value=st.session_state.scan_data["m"])
+        col1, col2 = st.columns(2)
+        with col1:
+            d = st.date_input("Datum", st.session_state.scan_data["d"])
+            h = st.text_input("Händler", st.session_state.scan_data["h"])
+        with col2:
+            b = st.number_input("Betrag (CHF)", value=st.session_state.scan_data["b"], step=0.05)
+            m = st.number_input("MwSt %", value=st.session_state.scan_data["m"], step=0.1)
         
         if st.form_submit_button("Speichern"):
             dm.add_entry(d.strftime("%Y-%m-%d"), "Ausgabe", h, b, m, "AUSGABE")
